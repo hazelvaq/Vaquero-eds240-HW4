@@ -1,0 +1,381 @@
+```{r}
+# Import libraries
+library(tidyverse)
+library(dplyr)
+library(ggplot2)
+library(here)
+library(janitor)
+library(sf)
+library(jsonlite)
+library(treemap)
+library(ggrepel)
+library(osmdata)
+library(sf)
+library(ggmap)
+library(leaflet)
+library(patchwork)
+```
+
+
+
+```{r}
+nyc_trees <- st_read("data/tree_data/geo_export_145e1dbe-8d16-4451-aa07-a8915754603a.shp") 
+
+
+nyc_boundary <- st_read("data/nyc_boundary/geo_export_cba87a71-9b4b-45bc-9ca2-8cd5cf2eabdb.shp")
+
+```
+
+
+```{r}
+
+# Borough with highest dead trees
+boro <- nyc_trees %>% 
+  filter(status == "Dead" | status == "Stump") %>% 
+  group_by(boroname) %>% 
+  summarize(dead = n()) %>% 
+  st_drop_geometry()
+
+
+
+boro1 <- nyc_trees %>% 
+  filter(status == "Alive") %>% 
+  group_by(boroname) %>% 
+  summarize(alive = n()) %>% 
+  st_drop_geometry()
+
+
+boro_merge <- merge(boro, boro1)
+
+boro_merge <- boro_merge %>% 
+  mutate(ratio = dead/alive)
+
+```
+
+
+```{r}
+# BRONX boundary
+
+bronx_bounds <- nyc_boundary %>% 
+  filter(boro_name == "Bronx")
+
+st_crs(bronx_bounds) == st_crs(nyc_trees)
+
+
+bronx_dead <- nyc_trees %>% filter(boroname == "Bronx",
+                          status == "Dead" |
+                            status == "Stump")
+```
+
+
+
+```{r}
+
+
+street <- st_read("data/streets/geo_export_91484df4-44a2-4d46-84d2-cd2a2c7aa183.shp")
+
+
+# Intersection of streets in that neighborhood
+#north_wi
+#streets
+
+street <- st_transform(street, st_crs(bronx_dead))
+
+st_is_valid(street)
+st_is_valid(bronx_bounds)
+
+# Streets of North Williamsburg to be used to find frequency of trees
+breezy_street <- st_intersection(street, bronx_bounds) %>% 
+  st_union()
+
+
+ggplot() +
+  geom_sf(data = bronx_bounds) +
+  geom_sf(data = breezy_street) +
+  geom_sf(data = breezy_street) +
+  geom_sf(data = bronx_dead, color = "red") +
+  theme_void()
+
+```
+
+```{r}
+
+osm_st <- st_read("data/osm_nyc/gis_osm_natural_free_1.shp")
+
+api <- "AIzaSyCrZy4GQQhw_J2jrnTgLFIEZxl1a2fzdeE"
+
+register_google(api)
+
+```
+
+
+```{r}
+
+## Load in Highways and roads in Bushwick North ----
+bush_roads_raw <- 
+  st_bbox(bronx_bounds) %>%
+  opq() %>%
+  add_osm_feature("highway") %>%
+  osmdata_sf()
+
+
+bush_outline <- 
+  bronx_bounds %>%
+  st_simplify() %>%
+  st_union() %>%
+  st_buffer(dist = 0.001)
+
+
+bush_roads <- 
+  bush_roads_raw$osm_lines %>%
+  st_transform(st_crs(bronx_bounds)) %>%
+  st_crop(st_bbox(bronx_bounds)) %>% 
+  st_transform(3488) ## transform to meters
+
+# CRS transforms ----
+bush_roads <- st_transform(bush_roads, crs = st_crs(bronx_bounds))
+
+bush_roads_buffer <- 
+  bush_roads %>% 
+  st_buffer(dist = 20, endCapStyle = "FLAT")
+
+
+bush_roads_buffer <- st_transform(bush_roads_buffer, crs = st_crs(bronx_bounds))
+bronx_dead <- st_transform(bronx_dead, crs = st_crs(bronx_bounds))
+
+
+
+sf_roads_trees <- bush_roads %>% 
+  mutate(
+    length = as.numeric(st_length(.)),
+    tree_count = lengths(st_intersects(bush_roads_buffer, bronx_dead))
+  ) 
+
+# Clip frequency of trees to Bushwick North
+bbbb <- st_intersection(bronx_bounds, sf_roads_trees)
+
+
+# Zero streets
+zero_streets <- bbbb %>% 
+  filter(tree_count == 0)
+
+# Count of trees on streets
+tree_streets <- bbbb %>% 
+  filter(tree_count != 0)
+
+
+# Plotting map ----
+ggplot() +
+  geom_sf(data = bronx_bounds, lwd = 0.8, color = "black", fill = "grey90")+
+  geom_sf(data = zero_streets,
+          color = "#4CAF50",
+          lwd = 0.5,
+          alpha = 0.5) +
+  geom_sf(data = tree_streets,
+          aes(color = tree_count),
+          lwd = 1) +
+  scale_color_gradient(low = "#4CAF50",high = "#8B4513", 
+                       na.value = NA,
+                       name = "Dead Trees Frequency") +
+  theme_void()
+  
+
+```
+
+
+```{r}
+
+### Neighborhood in the Bronx with highest amount of dead tree
+
+bronx_neigh_dead <- nyc_trees %>% 
+  filter(status == "Dead" |
+           status == "Stump") %>% 
+  filter(boroname == "Bronx") %>% 
+  group_by(nta_name) %>% 
+  summarise(dead = n()) %>% 
+  st_drop_geometry()
+  
+
+bronx_neigh_alive <- nyc_trees %>% 
+  filter(status == "Alive") %>% 
+  group_by(nta_name) %>% 
+  summarise(alive = n()) %>% 
+  st_drop_geometry()
+
+
+bronx <- merge(bronx_neigh_dead, bronx_neigh_alive) %>% 
+  mutate(ratio = dead/alive)
+
+```
+
+
+```{r}
+
+# Bronxdale
+
+bronxdale <- bronx_bounds %>% 
+  filter(ntaname == "Bronxdale")
+
+
+
+
+## Load in Highways and roads in Bushwick North ----
+bush_roads_raw <- 
+  st_bbox(bronxdale) %>%
+  opq() %>%
+  add_osm_feature("highway") %>%
+  osmdata_sf()
+
+
+bush_outline <- 
+  bronxdale %>%
+  st_simplify() %>%
+  st_union() %>%
+  st_buffer(dist = 0.001)
+
+
+bush_roads <- 
+  bush_roads_raw$osm_lines %>%
+  st_transform(st_crs(bronxdale)) %>%
+  st_crop(st_bbox(bronxdale)) %>% 
+  st_transform(3488) ## transform to meters
+
+# CRS transforms ----
+bush_roads <- st_transform(bush_roads, crs = st_crs(bronxdale))
+
+bush_roads_buffer <- 
+  bush_roads %>% 
+  st_buffer(dist = 20, endCapStyle = "FLAT")
+
+
+bush_roads_buffer <- st_transform(bush_roads_buffer, crs = st_crs(bronxdale))
+bronx_dead <- st_transform(bronx_dead, crs = st_crs(bronxdale))
+
+
+
+sf_roads_trees <- bush_roads %>% 
+  mutate(
+    length = as.numeric(st_length(.)),
+    tree_count = lengths(st_intersects(bush_roads_buffer, bronx_dead))
+  ) 
+
+# Clip frequency of trees to Bushwick North
+bbbb <- st_intersection(bronxdale, sf_roads_trees)
+
+
+# Zero streets
+zero_streets <- bbbb %>% 
+  filter(tree_count == 0)
+
+# Count of trees on streets
+tree_streets <- bbbb %>% 
+  filter(tree_count != 0)
+
+
+# Plotting map ----
+ggplot() +
+  geom_sf(data = bronxdale, lwd = 0.8, color = "black", fill = "grey90")+
+  geom_sf(data = zero_streets,
+          color = "#4CAF50",
+          lwd = 0.5,
+          alpha = 0.5) +
+  geom_sf(data = tree_streets,
+          aes(color = tree_count),
+          lwd = 1) +
+  scale_color_gradient(low = "#4CAF50",high = "#8B4513", 
+                       na.value = NA,
+                       name = "Dead Trees Frequency") +
+  theme_void()
+  
+
+
+```
+
+
+
+```{r}
+# BRONXDALE DEAD TREES DIAMETER
+
+bronxdale_diameter <- nyc_trees %>% 
+  filter(nta_name == "Bronxdale",
+         status == "Dead") %>% 
+  group_by(tree_dbh) 
+
+
+summary(bronxdale_diameter$tree_dbh)
+
+
+p1 <- ggplot(data = bronxdale_diameter) +
+  ggridges::geom_density_ridges(aes(x = tree_dbh, y = boroname), fill = "#8B4513") +
+  theme_void()
+
+### ----
+# Tree diameter 
+
+tree_diameter1 <- bronxdale_diameter %>% 
+  filter(tree_dbh >= 2 & tree_dbh < 3) %>% 
+  summarise(count = n()) %>% 
+  summarise(total = sum(count)) %>% 
+  mutate(diameter = "2 - 3") %>% 
+  st_drop_geometry()
+
+tree_diameter2 <- bronxdale_diameter %>% 
+  filter(tree_dbh >= 3 & 
+           tree_dbh < 4) %>% 
+  summarise(count = n()) %>%
+  summarise(total = sum(count)) %>% 
+  mutate(diameter = "3 - 4") %>% 
+  st_drop_geometry()
+
+
+tree_diameter3 <- bronxdale_diameter %>% 
+  filter(tree_dbh >= 4 & 
+           tree_dbh < 11) %>% 
+  summarise(count = n()) %>% 
+  summarise(total = sum(count)) %>% 
+  mutate(diameter = "4 - 11") %>% 
+  st_drop_geometry()
+
+tree_diameter4 <- bronxdale_diameter %>% 
+  filter(tree_dbh >= 11 & 
+           tree_dbh <= 21) %>% 
+  summarise(count = n()) %>% 
+  summarise(total = sum(count)) %>% 
+  mutate(diameter = "11 - 21") %>% 
+  st_drop_geometry()
+
+
+tree_dim <- bind_rows(tree_diameter1, 
+                      tree_diameter2, 
+                      tree_diameter3, 
+                      tree_diameter4) 
+
+
+
+
+
+```
+
+
+
+
+```{r}
+
+circle_data <- data.frame(x = c(0, 1, 2, 3), y = c(1, 1, 1, 1), shape = c(11,15,19,16))
+
+# Plotting circles using ggplot2
+p2 <- ggplot(circle_data, aes(x = x, y = y, size = shape)) +
+  geom_point(color = "#8B4513", alpha = 0.7) +
+  scale_size(range = c(20, 40)) +
+  xlim(0, 4) +
+  ylim(0, 4) +
+  theme_void() +
+  theme(legend.position = "none")
+
+
+
+plot(p1)
+plot(p2)
+```
+
+
