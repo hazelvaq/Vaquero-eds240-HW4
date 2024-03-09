@@ -102,7 +102,6 @@ ggplot() +
 
 osm_st <- st_read("data/osm_nyc/gis_osm_natural_free_1.shp")
 
-api <- "AIzaSyCrZy4GQQhw_J2jrnTgLFIEZxl1a2fzdeE"
 
 register_google(api)
 
