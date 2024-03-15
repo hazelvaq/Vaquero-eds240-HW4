@@ -1,0 +1,329 @@
+---
+title: "HW3"
+author: "Hazel Vaquero"
+date: '`r format(Sys.time(), "%d %B, %Y")`'
+format:
+  html:
+    embed-resources: true
+---
+
+### Objective
+
+For HW#4 I plan to pursue option #2, creating an infographic. My overarching question is: Is there a borough in NYC with more prevelant dead street trees? This question has changed from HW #1 as I had originally wanted to answer the public health benefits of trees. Finding data at a localized level where it would make sense to compare to tree density was difficult. Instead, I will work with The Department of Parks and Recreation 2015 NYC Street Tree Census.
+
+The three sub-questions I will be answering are:
+
+1.  What is the current health status distribution of all street trees across the 5 boroughs?
+
+-   Variables: `health` this is the health of the trees and it is divided into 4 categories ("Good","Fair", "Poor", and "Dead"). With the 4 categories, I will calculate the number of trees in each and plot it as a treemap. To then see how is the health status distributed across the 5 boroughs.
+
+2.  What borough has the highest percentage of dead trees?
+
+-   Variables: `status` which is either the tree is alive, dead, or a stump. I will be assuming that trees listed as stumps are considered dead. Based on the borough I will find the count of dead + stump trees in the 5 boroughs. Then this will be plotted as a bar plot by `boroname` which is the borough name.
+
+3.  What neighborhood in the identified borough has the most number of dead trees? What neighborhood requires street tree rehabilitation?
+
+    The variables I will be using will be `nta_name` which is the neighborhood name and the OSM Google package to access streets and roads. This will be used to do a spatial analysis to determine how many dead trees are reported per street.
+
+##### Visualization Inspiration
+
+One visualization that I will be using for inspiration is Cedric Scherer [Tidy Tuesday](https://github.com/Z3tt/TidyTuesday/tree/main/plots/2020_05) of San Francisco street tree species by street. I will be using his code to determine how to find the tree frequency by street, essentially developing a buffer for the streets and then doing a spatial intersection.
+
+Another visualization that I will be using for inspiration is a combination of [Georgios Karamanis](https://github.com/gkaramanis/tidytuesday/tree/master/2024/2024-week_08) and [Zhi Yang](https://zhiyang.netlify.app/post/treemap/) tree maps. I will be incorporating the interactive aspect of Zhi Yang's to my blog post and I want to do something similar on how they had multiple variables per group. From Georgios I want to incorporate something similar to how he has the years in the background per group. I will try to do something similar by displaying the borough name per street tree health status. As well as adding the number of trees per category like his.
+
+
+##### Drawings of anticipated visuals
+
+![](figures/plot1.png){width="259"}
+
+![](figures/plot2.png){width="270"}
+
+![](figures/plot3.png){width="280"}
+
+##### Questions
+
+The major challenge I encountered as I built my iterations was figuring out what I wanted to represent and show. I was originally interested in showing the tree species and their relationship to tree diameter. But there are over 120 tree species in the data set, all with varying growth rates so it would be too complicated and messy to display it in one graph. Another challenge was when working with the data I constantly had new ideas on what I wanted to explore. When I was developing the map of the distribution of dead trees across NYC, I became interested in if I could display the mean diameter of the dead trees and whether is there a certain age that the trees are dying at. But then there was the issue of one tree having a diameter greater than 400 and a majority of the trees dying relatively young made the distribution hard to plot.
+
+The ggplot extensions I will be using so far are `geom_sf()` and `geom_bar()`. I am also planning on using `treemap`, and `osmdata` for street and highway boundaries. I will be learning how to use `osmdata` and acquiring highways and streets from Google map. I will also be using `showtext` to add text on the graphs to display percentages.   
+
+The feedback I'll need is on the color choices of the maps. Are they good color choices? For the street tree frequency can you tell the brown apart from the green? For the bar plot I decided to just highlight the borough with the highest dead tree rate. Are the greyed out bars distracting?
+
+
+#### Mockup visualizations
+
+```{r, include=FALSE}
+# Import libraries
+# Import libraries
+library(tidyverse)
+library(dplyr)
+library(ggplot2)
+library(here)
+library(janitor)
+library(sf)
+library(jsonlite)
+library(treemap)
+library(ggrepel)
+library(osmdata)
+library(sf)
+library(ggmap)
+library(ggpubr)
+library(patchwork)
+library(cowplot)
+library(treemap)
+library(showtext)
+library(webshot)
+```
+
+
+```{r, message=FALSE, warning=FALSE, results='hide'}
+# Read in 2015 NYC Street Tree Census data 
+nyc_trees <- st_read("data/tree_data/geo_export_145e1dbe-8d16-4451-aa07-a8915754603a.shp") 
+
+# Read in NYC boundary
+nyc_boundary <- st_read("data/nyc_boundary/geo_export_cba87a71-9b4b-45bc-9ca2-8cd5cf2eabdb.shp")
+
+```
+
+```{r}
+# Set color palette and font
+tree_map <- c("Good"= "#46a312",
+              "Fair" = "#869F3B",
+              "Poor" = "#CFBB59",
+              "Dead" = "#622A0F")
+
+
+tree_palette <- c("dead" = "#622A0F", 
+                    "alive" = "#69cf6d", 
+                    "fill_grey" = "grey90")
+
+# Add Alegreya font
+font_add_google(name = "Alegreya", family = "alegreya")
+
+
+```
+
+
+#### First Visualization
+```{r, message=FALSE}
+# First Visualization ----
+# Treemap
+
+bstatus <- nyc_trees %>% 
+  select(boroname, health) %>% 
+  group_by(health,boroname) %>% 
+  summarise(count = n()) %>% 
+  st_drop_geometry() %>% 
+  mutate(health = replace_na(health, "Dead")) %>% 
+  mutate(colors = ifelse(health %in% names(tree_map), tree_map[health],NA))
+
+treemap(bstatus,
+        index = c("boroname", "health"), 
+        vSize = "count",
+        type = "color",
+        vColor = "colors", 
+        fontsize.labels = c(12,9.5),
+        labels = FALSE,
+        bg.labels = 0,
+        border.col = "black",
+        border.lwds = 1.5,
+        fontcolor.labels = "white",
+        align.labels = list(c("center","center"),c("left","top")),
+        force.print.labels = TRUE,
+        title = "NYC Street Tree Health Status",
+        fontfamily.title = "alegreya"
+        ) 
+
+```
+
+
+#### Second Visualization
+```{r}
+# Borough dead and stump tree count
+boro <- nyc_trees %>% 
+  filter(status == "Dead" | status == "Stump") %>% 
+  group_by(boroname) %>% 
+  summarize(dead = n()) %>% 
+  st_drop_geometry()
+
+
+# Borough alive trees count
+boro1 <- nyc_trees %>% 
+  filter(status == "Alive") %>% 
+  group_by(boroname) %>% 
+  summarize(alive = n()) %>% 
+  st_drop_geometry()
+
+# Merge
+boro_merge <- merge(boro, boro1)
+
+# Percent of dead trees
+# Bronx determined as having the highest percentage
+boro_merge <- boro_merge %>% 
+  mutate(ratio = dead/alive)
+```
+
+
+```{r}
+# Add a highlight column in boro_merge for plotting
+boro_merge <- boro_merge %>% 
+  mutate(highlight = ifelse(boroname == "Bronx",1,0)) %>% 
+  mutate(highlight = as.factor(highlight))
+
+# Set color palette 
+bar_palette <- c("grey70","#622A0F")
+
+ggplot(data = boro_merge, aes(x = reorder(boroname,ratio), y = ratio, fill = highlight)) +
+  geom_bar(stat = "identity") +
+  geom_text(aes(label = scales::percent(ratio)), hjust = 1.2, color = "white") +
+  coord_flip() + 
+  theme_classic() +
+  scale_fill_manual(values = bar_palette) +
+  theme(legend.position = "none",
+        panel.grid.major.y = element_blank(),
+        panel.grid.major.x = element_blank(),
+        panel.grid.minor.y = element_blank(),
+        axis.title.y = element_blank(),
+        text = element_text(family = "alegreya", color = "black"),
+        axis.text = element_text(color = "black", size = 10),
+        plot.title = element_text(size = 14),
+        axis.text.x = element_blank(),
+        axis.ticks.x = element_blank(),
+        axis.title.x = element_blank()) +
+  scale_y_continuous(labels = scales::percent) +
+  expand_limits(y = .061) +
+  labs(title = "Percentage of Dead Street Trees Across the 5 Boroughs")
+  
+
+```
+
+#### Third Visualization
+```{r}
+### Neighborhood in the Bronx with highest amount of dead tree
+bronx_neigh_dead <- nyc_trees %>% 
+  filter(boroname == "Bronx") %>% 
+  filter(status == "Dead" |
+           status == "Stump") %>% 
+  filter(boroname == "Bronx") %>% 
+  group_by(nta_name) %>% 
+  summarise(dead = n()) %>% 
+  st_drop_geometry()
+  
+
+# Count number of alive trees by neighborhood in the Bronx
+bronx_neigh_alive <- nyc_trees %>% 
+  filter(boroname == "Bronx") %>% 
+  filter(status == "Alive") %>% 
+  group_by(nta_name) %>% 
+  summarise(alive = n()) %>% 
+  st_drop_geometry()
+
+# Determine the percent of dead trees by neighborhoods
+# Bronxdale identified as the highest percentage
+bronx <- merge(bronx_neigh_dead, bronx_neigh_alive) %>% 
+  mutate(ratio = (round(dead/alive, 3))) %>% 
+  rename(ntaname = nta_name)
+
+```
+
+
+```{r}
+# BRONX boundary
+
+bronx_bounds <- nyc_boundary %>% 
+  filter(boro_name == "Bronx")
+
+#st_crs(bronx_bounds) == st_crs(nyc_trees)
+
+# Bronxdale
+bronxdale <- bronx_bounds %>% 
+  filter(ntaname == "Bronxdale")
+
+# Dead Trees in the Bronx
+bronx_dead <- nyc_trees %>% 
+  filter(boroname == "Bronx") %>% 
+  filter(status %in% c("Dead", "Stump"))
+
+```
+
+
+```{r, message=FALSE, warning=FALSE}
+## Load in Highways and roads in Bronxdale ----
+bush_roads_raw <- 
+  st_bbox(bronxdale) %>%
+  opq() %>%
+  add_osm_feature("highway") %>%
+  osmdata_sf()
+
+
+bush_outline <- 
+  bronxdale %>%
+  st_simplify() %>%
+  st_union() %>%
+  st_buffer(dist = 0.001)
+
+
+bush_roads <- 
+  bush_roads_raw$osm_lines %>%
+  st_transform(st_crs(bronxdale)) %>%
+  st_crop(st_bbox(bronxdale)) %>% 
+  st_transform(3488) ## transform to meters
+
+# CRS transforms ----
+bush_roads <- st_transform(bush_roads, crs = st_crs(bronxdale))
+
+bush_roads_buffer <- 
+  bush_roads %>% 
+  st_buffer(dist = 20, endCapStyle = "FLAT")
+
+
+bush_roads_buffer <- st_transform(bush_roads_buffer, crs = st_crs(bronxdale))
+bronx_dead <- st_transform(bronx_dead, crs = st_crs(bronxdale))
+
+
+
+sf_roads_trees <- bush_roads %>% 
+  mutate(
+    length = as.numeric(st_length(.)),
+    tree_count = lengths(st_intersects(bush_roads_buffer, bronx_dead))
+  ) 
+
+# Clip frequency of trees to Bronxdale 
+bbbb <- st_intersection(bronxdale, sf_roads_trees)
+
+
+# Zero streets
+zero_streets <- bbbb %>% 
+  filter(tree_count == 0)
+
+# Count of trees on streets
+tree_streets <- bbbb %>% 
+  filter(tree_count != 0)
+
+# Tree palette
+tree_palette <- c("dead" = "#622A0F", 
+                    "alive" = "#69cf6d", 
+                    "fill_grey" = "grey95")
+
+
+
+# Map of streets
+ggplot() +
+  geom_sf(data = bronxdale, lwd = 0.5, color = "black", fill = tree_palette["fill_grey"]) +
+  geom_sf(data = bbbb,
+          aes(color = tree_count),
+          lwd = 1) +
+  scale_color_gradient2(low = "white", 
+                        mid = tree_palette["alive"],
+                        high = tree_palette["dead"], 
+                       na.value = NA,
+                       name = "Dead Trees Frequency",
+                       breaks = c(0, 5, 10, 15, 20),
+                       limits = c(0,20)) +
+  labs(title = stringr::str_wrap("Streets in Bronxdale, Bronx that require the most street tree rehabilitation")) +
+  theme(text = element_text(family = "alegreya")) +
+    theme_void() 
+
+```
+
+
+
